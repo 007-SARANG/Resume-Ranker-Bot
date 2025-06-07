@@ -1,74 +1,68 @@
-# Resume Ranker and Feedback Bot
-
-import os
+import streamlit as st
 import docx2txt
 import PyPDF2
-import streamlit as st
+import os
+import tempfile
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import language_tool_python
-from sentence_transformers import SentenceTransformer, util
+from gingerit.gingerit import GingerIt
 
-# Initialize tools
-language_tool = language_tool_python.LanguageTool('en-US')
-bert_model = SentenceTransformer('all-MiniLM-L6-v2')
+# Title
+st.title("📄 Resume Ranker & Feedback Bot")
 
-# --- File Reading Utilities ---
-def extract_text_from_pdf(pdf_path):
-    with open(pdf_path, 'rb') as f:
-        reader = PyPDF2.PdfReader(f)
-        return " ".join([page.extract_text() or "" for page in reader.pages])
+# Upload Resume(s)
+uploaded_files = st.file_uploader("Upload Resume(s)", type=["pdf", "docx"], accept_multiple_files=True)
 
-def extract_text_from_docx(docx_path):
-    return docx2txt.process(docx_path)
+# Job Description
+job_description = st.text_area("Paste Job Description Here")
 
-def extract_text(file):
-    if file.name.endswith('.pdf'):
-        with open(file.name, 'wb') as f:
-            f.write(file.read())
-        return extract_text_from_pdf(file.name)
-    elif file.name.endswith('.docx'):
-        with open(file.name, 'wb') as f:
-            f.write(file.read())
-        return extract_text_from_docx(file.name)
-    else:
-        return file.read().decode('utf-8')
+# Button
+if st.button("🔍 Rank Resumes") and uploaded_files and job_description:
 
-# --- Skill Matching and Feedback ---
-def get_similarity_score(resume_text, jd_text):
-    embeddings = bert_model.encode([resume_text, jd_text])
-    score = util.cos_sim(embeddings[0], embeddings[1])
-    return float(score)
+    resumes = []
+    names = []
 
-def get_language_feedback(text):
-    matches = language_tool.check(text)
-    return [match.message for match in matches[:5]]
+    for file in uploaded_files:
+        file_text = ""
+        if file.type == "application/pdf":
+            pdf_reader = PyPDF2.PdfReader(file)
+            for page in pdf_reader.pages:
+                file_text += page.extract_text()
+        elif file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+                tmp.write(file.read())
+                file_text = docx2txt.process(tmp.name)
+                os.unlink(tmp.name)
 
-def get_missing_keywords(resume_text, jd_text):
-    resume_words = set(resume_text.lower().split())
-    jd_words = set(jd_text.lower().split())
-    return list(jd_words - resume_words)[:10]  # Top 10 missing
+        resumes.append(file_text)
+        names.append(file.name)
 
-# --- Streamlit UI ---
-st.title("AI Resume Ranker & Feedback Bot")
+    # TF-IDF Similarity
+    vectorizer = TfidfVectorizer(stop_words='english')
+    vectors = vectorizer.fit_transform([job_description] + resumes)
+    similarity_scores = cosine_similarity(vectors[0:1], vectors[1:]).flatten()
 
-resume_file = st.file_uploader("Upload Your Resume (PDF or DOCX)", type=['pdf', 'docx', 'txt'])
-jd_text = st.text_area("Paste the Job Description Here")
+    # Grammar Feedback using GingerIt
+    parser = GingerIt()
 
-if st.button("Evaluate Resume") and resume_file and jd_text:
-    resume_text = extract_text(resume_file)
-    score = get_similarity_score(resume_text, jd_text)
-    feedback = get_language_feedback(resume_text)
-    missing = get_missing_keywords(resume_text, jd_text)
+    st.subheader("📊 Ranking Results")
+    ranked_data = sorted(zip(names, resumes, similarity_scores), key=lambda x: x[2], reverse=True)
 
-    st.subheader("📊 Match Score")
-    st.write(f"{score * 100:.2f}% match with job description")
+    for i, (name, text, score) in enumerate(ranked_data, start=1):
+        st.markdown(f"### {i}. {name}")
+        st.write(f"**Relevance Score**: {round(score * 100, 2)}%")
 
-    st.subheader("❌ Missing Keywords")
-    st.write(", ".join(missing))
+        # Grammar Feedback
+        try:
+            result = parser.parse(text[:1200])  # Limit size for API
+            corrections = result.get('corrections', [])
+            st.write(f"**Grammar Suggestions**: {len(corrections)}")
+            if corrections:
+                st.expander("🔧 See suggestions").write(corrections)
+        except Exception as e:
+            st.warning("Grammar check skipped due to error or rate limit.")
 
-    st.subheader("📝 Language Suggestions")
-    for f in feedback:
-        st.write("-", f)
+        st.divider()
 
-    st.success("Analysis Complete!")
+else:
+    st.info("Please upload resumes and enter a job description to begin.")
