@@ -7,4 +7,3 @@ pandas
 scikit-learn
 nltk
 sentence_transformers
-torch
