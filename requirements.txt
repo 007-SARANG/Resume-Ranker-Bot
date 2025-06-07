@@ -1,7 +1,6 @@
 streamlit
 docx2txt
 PyPDF2
-gingerit = 0.8.1
 numpy
 pandas
 scikit-learn
