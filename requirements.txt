@@ -1,0 +1,4 @@
+streamlit
+language_tool_python
+numpy
+pandas
