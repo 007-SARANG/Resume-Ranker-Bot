@@ -1,4 +1,5 @@
 streamlit
+docx2txt
 language_tool_python
 numpy
 pandas
